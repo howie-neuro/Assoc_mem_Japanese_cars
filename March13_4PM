@@ -1,0 +1,190 @@
+I am trying to develop models of chunked semantic memory. 
+
+I start with a simple structure that tries to bind together car company, car model, and country of manufacturer, where coincidence in time is used to organize the information.  
+
+Code for this model is below:
+
+import nengo
+import nengo.spa as spa
+
+D = 64
+model = spa.SPA(seed = 1)
+with model:
+   
+   Vocab =  ['TOYOTA', 'RAV4', 'CRV','COROLLA', 'CAMRY', 'HONDA', 'ACCORD', 'CIVIC', 'JAPAN']
+   model.vocab = spa.Vocabulary(D)
+   for word in Vocab:
+       model.vocab.parse(word)
+   model.Model = spa.State(D, feedback = 1)
+   model.Company = spa.State(D, feedback = 1)
+   model.Country = spa.State(D, feedback = 1)
+   model.Bind_model_company = spa.State(D, feedback = 1)
+   model.Get_Company = spa.State(D, feedback = D)
+   model.Toyota_model = spa.State(D, feedback = 1)
+   model.act_bind_model_company = spa.Actions (
+       'Bind_model_company = Model * Company')
+   model.get_Toyota_model = spa.Actions (
+       'Toyota_model = Bind_model_company * ~TOYOTA'
+       )
+   
+   model.cort_get_Toyota_model = spa.Cortical(model.get_Toyota_model)   
+       
+   model.Cort_Bind_model_company = spa.Cortical(model.act_bind_model_company)
+   def input_company(t):
+       if 0 < t < 2:
+           return 'TOYOTA'
+       elif 4 < t < 12:
+           return 'HONDA'
+       else:
+           return '0'
+           
+   def input_model(t):
+       if 0 < t < 2:
+           return 'CAMRY'
+       elif 4 < t < 6:
+           return 'ACCORD'
+       elif 6 < t < 8:
+           return 'CIVIC'
+       elif 8 < t < 10:
+           return 'CRV'
+       
+       else:
+           return '0'
+   def input_country(t):
+       return 'JAPAN'
+       
+   model.Input_model = spa.Input(Model = input_model)
+   model.Input_company = spa.Input(Company = input_company)
+   model.Input_country = spa.Input(Country = input_country)        
+   model.Query_model = spa.State(D)
+   
+   model.get_Company = spa.Actions (
+       'Get_Company = Bind_model_company * ~Query_model'
+       )
+   model.Cort_get_company = spa.Cortical(model.get_Company)
+
+I would like the model.Bind_model_company (spa.State) object to store multiple (?4 or 5) pairs (e.g. HONDA*CRV, HONDA*ACCORD, TOYOTA*RAV4 …), but state objects are designed hold only one vector at a time.  
+
+Once a new pair is  presented, the old mapping appears to be overwritten.
+
+Coming from a  connectionist mindset, I have trouble understanding this and I can’t overcome my intuitions that a small piece of cortex could store mappings between several input and output vectors.
+
+So the AssociativeMemory object seemed made to solve just this problem.  The object has one assembly with 50 neurons for each item in its vocabulary and thus each neuronal assembly of 50 neurons has a dimension of 1.  
+
+Perhaps a problem with my understanding is that the a model.vocab object does not show up in the gui.   Presumably, the vocab is coded in ‘neurons’, but … ??
+
+ 
+My attempts at using the AssociativeMemory objects to so these mappings are below.
+First I mapped from model to company to country (I,e, 3 AssociativeMemories).  For all of these connections, a transform of 1 was sufficient to activate the final modules.
+
+import nengo
+import nengo.spa as spa
+# use associative memory instead of state because holds more memories
+# why arem't vocab shown in gui?
+
+# note no noise 
+# AM not fedback on self ...
+# parsing local-global
+D = 64
+model = spa.SPA()
+with model:
+   model.Toyota_new_vocab_specific = spa.Vocabulary(D)
+   model.Toyota_new_vocab_general = spa.Vocabulary(D)
+  
+   Toyota_new_vocab =  ['TOYOTA', 'RAV4', 'COROLLA', 'CAMRY']
+   Toy_spec_gen_input_keys = ['RAV4', 'COROLLA', 'CAMRY']
+   Toy_spec_gen_output_keys = ['TOYOTA', 'TOYOTA', 'TOYOTA']
+   for word in Toyota_new_vocab:
+       model.Toyota_new_vocab_general.parse(word)
+   model.AM_Toyota_models_spec = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general)
+   
+   model.AM_Toyota_general = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general,
+        input_keys = Toy_spec_gen_input_keys, output_keys =Toy_spec_gen_output_keys)
+   def input_Toyota_model(t):
+       if 0 < t < 3:
+           return 'COROLLA'
+       else:
+           return '0'
+   Japanese_spec_general_input_keys = ['TOYOTA', 'HONDA']
+   Japanese_spec_general_output_keys = ['JAPANESE', 'JAPANESE']
+   model.Input_Toyota_model = spa.Input(AM_Toyota_models_spec = input_Toyota_model)
+   nengo.Connection(model.AM_Toyota_models_spec.output, model.AM_Toyota_general.input, synapse = 0.2, transform = 1, seed = 1)
+   
+   Japanese_car_vocab = ['JAPANESE', 'HONDA', 'TOYOTA']
+   
+   model.vocab_Japanese_car = spa.Vocabulary(D)
+   for word in Japanese_car_vocab:
+       model.vocab_Japanese_car.parse(word)
+       
+   model.AM_Japanese = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general,
+        input_keys = Japanese_spec_general_input_keys, output_keys = Japanese_spec_general_output_keys)
+   nengo.Connection(model.AM_Toyota_general.output, model.AM_Japanese.input, synapse = 0.2, transform = 1, seed = 1)        
+   
+   
+Then when I added a 4th mapping from country to continent, activation of the final object would only occur if I increased the transform weight.  
+ 
+
+import nengo
+import nengo.spa as spa
+# use associative memory instead of state because holds more memories
+
+# note no noise 
+# AM not fedback on self ...
+
+D = 64
+model = spa.SPA()
+with model:
+   model.Toyota_new_vocab_specific = spa.Vocabulary(D)
+   model.Toyota_new_vocab_general = spa.Vocabulary(D)
+  
+   Toyota_new_vocab =  ['TOYOTA', 'RAV4', 'COROLLA', 'CAMRY']
+   Toy_spec_gen_input_keys = ['RAV4', 'COROLLA', 'CAMRY']
+   Toy_spec_gen_output_keys = ['TOYOTA', 'TOYOTA', 'TOYOTA']
+   for word in Toyota_new_vocab:
+       model.Toyota_new_vocab_general.parse(word)
+   model.AM_Toyota_models_spec = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general)
+   
+   model.AM_Toyota_general = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general,
+        input_keys = Toy_spec_gen_input_keys, output_keys =Toy_spec_gen_output_keys)
+   def input_Toyota_model(t):
+       if 0 < t < 3:
+           return 'COROLLA'
+       else:
+           return '0'
+   Japanese_spec_general_input_keys = ['TOYOTA', 'HONDA']
+   Japanese_spec_general_output_keys = ['JAPANESE', 'JAPANESE']
+   model.Input_Toyota_model = spa.Input(AM_Toyota_models_spec = input_Toyota_model)
+   nengo.Connection(model.AM_Toyota_models_spec.output, model.AM_Toyota_general.input, synapse = 0.2, transform = 1, seed = 1)
+   
+   Japanese_car_vocab = ['JAPANESE', 'HONDA', 'TOYOTA']
+   
+   model.vocab_Japanese_car = spa.Vocabulary(D)
+   for word in Japanese_car_vocab:
+       model.vocab_Japanese_car.parse(word)
+       
+   model.AM_Japanese = spa.AssociativeMemory(input_vocab = model.Toyota_new_vocab_general, output_vocab = model.Toyota_new_vocab_general,
+        input_keys = Japanese_spec_general_input_keys, output_keys = Japanese_spec_general_output_keys)
+   nengo.Connection(model.AM_Toyota_general.output, model.AM_Japanese.input, synapse = 0.2, transform = 1, seed = 1)        
+   
+   vocab_Asian = ['JAPANESE', 'KOREAN', 'ASIAN']
+   Asian_spec_general_input_keys = ['JAPANESE', 'KOREAN']
+   Asian_spec_general_output_keys = ['ASIAN', 'ASIAN']
+   
+   model.vocab_Asian = spa.Vocabulary(D)
+   for word in vocab_Asian:
+       model.vocab_Asian.parse(word)
+  model.AM_Asian = spa.AssociativeMemory(input_vocab = model.vocab_Asian, output_vocab =    model.vocab_Asian,  input_keys = Asian_spec_general_input_keys, output_keys = Asian_spec_general_output_keys)
+   # it was not activated with transform = 1
+   # nengo.Connection(model.AM_Japanese.output, model.AM_Asian.input, synapse = 0.2, transform = 1, seed = 1)        
+   nengo.Connection(model.AM_Japanese.output, model.AM_Asian.input, synapse = 0.2, transform = 2, seed = 1)
+
+
+MY QUESTIONS THEN:
+
+1.	 Has any created such a model of semantic memory that I could review?
+2.	  There must be a lot ‘under the hood’ of the AssociativeMemory object that I don’t understand.  The basic conundrum is how so few neurons can accomplish multiple mappings.
+3.	Possibly the trivial question of why with additional AssociativeMemory modules, greater and greater transforms are required to activate all of the modules.
+
+
+Thanks
+      
